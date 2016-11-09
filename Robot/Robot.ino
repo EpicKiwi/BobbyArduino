@@ -43,14 +43,9 @@
 #define deadTimeRunning 25    //Temps mort lors de chaque tour de boucle 
 #define rightMotorCalibration 0   //Reduction du moteur de droite pour calibration
 
-#define forwardAlternationTime 800 //Le temps minimum pour l'alternance de la direction quand le robot va tout droit
-#define forwardAlternationAmount 10 //L'angle a ajouter pour compenser la rotation
-
-#define turnDuration 2000 //Le temps mis pour tourner
-
 #define leftAngle 100   //Angle du servo pour tourner a gauche
 #define rightAngle 0    //Angle du servo pour tourner a droite
-#define frontAngle 48   //Angle du servo pour aller tout droit
+#define frontAngle 52   //Angle du servo pour aller tout droit
 
 Servo direction;  //Le servo
 int currentAngle = -1;  //L'angle actuel du servo
@@ -115,6 +110,36 @@ void searchLoop(){
   //Le code ici
 }
 
+bool justForward = false;
+
+/**
+ * Le programme du labirinthe
+ */
+void turnLoop(){
+  turnForward();
+  if(justForward){
+    if(isFree(true)){
+      goForward(100);
+    } else {
+      stop();
+      if(isRightFree()){
+        turn(true);
+      } else if(isLeftFree()){
+        turn(false);
+      } else {
+        justForward = false;
+      }
+    }
+  } else {
+    if(isFree(false)){
+      goBackward(100);
+    } else {
+      justForward = true;
+    }
+  }
+  delay(deadTimeRunning);
+}
+
 /**
  * Le programme permettant d'aller tout droit
  */
@@ -127,97 +152,27 @@ void forwardLoop(){
   }
   delay(deadTimeRunning);
 }
-enum action{
-  TURNLEFT,
-  TURNRIGHT,
-  GOFORWARD,
-  GOBACKWARD
-};
-
-enum sens{
-  FORWARD,
-  BACKWARD,
-  STOPED
-};
-
-enum dire{
-  LEFT,
-  RIGHT,
-  FRONT
-};
-
-sens currentSens = FORWARD;
-dire currentDirection = LEFT;
-action currentAction = TURNLEFT;
-long lastChangedTime = millis();
-bool started = false;
 
 /**
- * Le programme du labirinthe
+ * Toiurner dans la direction voulue
+ * @deprecated Utiliser une autre méthode ou composez la votre
+ * @param right
+ *  True  -> Aller a droite
+ *  False -> Aller a gauche
  */
-void turnLoop(){
-  if(!started){
-    started = true;
-    lastChangedTime = millis();
-  }
-  int actionDuration = millis() - lastChangedTime;
-  switch(currentSens){
-    case FORWARD:
-      goForward(100);
-      break;
-    case BACKWARD:
-      goBackward(100);
-      break;
-    #ifdef debug
-    default:
-      Serial.print("Unknown sens ");
-      Serial.println(currentSens);
-      break;
-    #endif
-  }
-  switch(currentDirection){
-    case TURNLEFT:
-      turnLeft();
-      break;
-    case TURNRIGHT:
-      turnRight();
-      break;
-    case FRONT:
-      turnForward();
-      break;
-    #ifdef debug
-    default:
-      Serial.print("Unknown direction ");
-      Serial.println(currentDirection);
-      break;
-    #endif
-  }
-  switch(currentAction){
-    case GOFORWARD:
-      currentDirection = FRONT;
-      currentSens = FORWARD;
-      break;
-    case GOBACKWARD:
-      currentDirection = FRONT;
-      currentSens = BACKWARD;
-      break;
-    case TURNLEFT:
-      currentDirection = LEFT;
-      currentSens = FORWARD;
-      if(actionDuration >= turnDuration){
-        currentAction = GOFORWARD;
-        lastChangedTime = millis();
-      }
-      break;
-    case TURNRIGHT:
-      currentDirection = RIGHT;
-      currentSens = FORWARD;
-      if(actionDuration >= turnDuration){
-        currentAction = GOFORWARD;
-        lastChangedTime = millis();
-      }
-      break;
-  }
+void turn(bool right){
+  turnForward();
+  goBackward(100);
+  delay(500);
+  stop();
+  if(right){
+    turnRight();
+  } else {
+    turnLeft();
+  }//Configuration du mode utilisé
+  goForward(100);
+  delay(2050);
+  turnForward();
 }
 
 /**
@@ -233,28 +188,8 @@ void stop(){
   digitalWrite(motor2B,LOW);
 }
 
-int lastTimeTurnForward = -1; //Le dernier temps pour alterner la position de la tête
-
 /**
- * Tourner la tête du robot en face
- */
-void turnForward(){
-  #if defined(debug)
-    Serial.println("Turning forward");
-  #endif
-  if(lastTimeTurnForward == -1){
-    lastTimeTurnForward = millis();
-  }
-  if((millis() - lastTimeTurnForward) >= forwardAlternationTime){
-    turnTo(frontAngle+forwardAlternationAmount);
-    lastTimeTurnForward = millis();
-  } else {
-    turnTo(frontAngle);
-  }
-}
-
-/**
- * Demarrer le robot en marche arrière
+ * Démarrer le robot en marche avant
  * @param spd
  *  Vitesse du robot entre 0 et 100
  */
@@ -265,7 +200,7 @@ void goForward(int spd){
     Serial.println(" %");
   #endif
   int amount = (spd*255)/100;
-  analogWrite(motor1A,amount);
+  analogWrite(motor1A,amount-rightMotorCalibration);
   digitalWrite(motor1B,LOW);
   analogWrite(motor2A,amount);
   digitalWrite(motor2B,LOW);
@@ -307,6 +242,16 @@ void turnLeft(){
     Serial.println("Turning left");
   #endif
   turnTo(leftAngle);
+}
+
+/**
+ * Tourner la tête du robot en face
+ */
+void turnForward(){
+  #if defined(debug)
+    Serial.println("Turning forward");
+  #endif
+  turnTo(frontAngle);
 }
 
 /**
@@ -430,3 +375,4 @@ bool isFree(bool front){
   long leftDistance = getDistance(front);
   return leftDistance > freeDistance;
 }
+
