@@ -10,7 +10,7 @@
  * Décommenter le mode demandé
  */
 //#define LABMODE       //Mode labirinthe
-//#define FORWARDMODE   //Mode tout droit
+#define FORWARDMODE   //Mode tout droit
 //#define SEARCHMODE    //Mode Recherche et attaque de la cible
 
 #define brEnable 13 //Pin d'activation des ponts
@@ -109,6 +109,8 @@ void loop() {
 void searchLoop(){
   //Le code ici
 }
+
+bool justForward = false;
 
 /**
  * Le programme du labirinthe
