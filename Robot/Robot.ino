@@ -1,15 +1,18 @@
 #include <Servo.h>
-//#include "I2Cdev.h"
-//#include "MPU6050_6Axis_MotionApps20.h"
+#include "I2Cdev.h"
+#include "MPU6050_6Axis_MotionApps20.h"
 //#include <Wire.h>
 
 #define debug //Commentez pour cacher les retour série
+#define gyDebug //Affiche les valeurs du gyroscope
+
+#define calibrationAmount 1
 
 /**
  * Configuration du mode utilisé
  * Décommenter le mode demandé
  */
-//#define LABMODE       //Mode labirinthe
+#define LABMODE       //Mode labirinthe
 //#define FORWARDMODE   //Mode tout droit
 //#define SEARCHMODE    //Mode Recherche et attaque de la cible
 
@@ -33,6 +36,7 @@
 #define echoPinfr 11
 #define trigPinfr 8
 #define servoPin 4  //Pin de controle du servomoteur
+#define INTERRUPT_PIN 2
 
 #define interruptPin 2  //Pin d'interruption (non utilisé)
 
@@ -43,12 +47,40 @@
 #define deadTimeRunning 25    //Temps mort lors de chaque tour de boucle 
 #define rightMotorCalibration 0   //Reduction du moteur de droite pour calibration
 
+#define forwardAlternationTime 800 //Le temps minimum pour l'alternance de la direction quand le robot va tout droit
+#define forwardAlternationAmount 10 //L'angle a ajouter pour compenser la rotation
+
+#define turnDuration 2000 //Le temps mis pour tourner
+
 #define leftAngle 100   //Angle du servo pour tourner a gauche
 #define rightAngle 0    //Angle du servo pour tourner a droite
 #define frontAngle 52   //Angle du servo pour aller tout droit
 
 Servo direction;  //Le servo
 int currentAngle = -1;  //L'angle actuel du servo
+
+MPU6050 mpu;
+
+bool gyEnabled = true;
+
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+Quaternion q;           // [w, x, y, z]         quaternion container
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+float calYpr[3];
+bool calibrated = false;
+long calibrationCount = 0;
+
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
 
 /**
  * Initialisation du robot et calibration
@@ -79,6 +111,63 @@ void setup() {
   dance();
   //Remise en face des roues
   turnForward();
+  
+  Wire.begin();
+  Wire.setClock(400000);
+
+  #ifdef debug
+    Serial.println("Initialisation du gyroscope");
+  #endif
+  mpu.initialize();
+  pinMode(INTERRUPT_PIN, INPUT);
+  gyEnabled = mpu.testConnection();
+  #ifdef debug
+    if(gyEnabled)
+      Serial.println("Connecte au gyroscope");
+    else
+      Serial.println("Impossible de se connecter au gyroscope");
+  #endif
+  #ifdef debug
+    Serial.println("Initialisation du MPU");
+  #endif
+  devStatus = mpu.dmpInitialize();
+  mpu.setXGyroOffset(-146);
+  mpu.setYGyroOffset(5);
+  mpu.setZGyroOffset(-45);
+  if (devStatus == 0) {
+        #ifdef debug
+          Serial.println("Activation du DMP");
+        #endif
+        mpu.setDMPEnabled(true);
+
+        #ifdef debug
+          Serial.println("Activation de l'interruption matériel");
+        #endif
+        attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
+        mpuIntStatus = mpu.getIntStatus();
+
+        #ifdef debug
+          Serial.println("Gyroscope pret");
+        #endif
+        dmpReady = true;
+
+        // get expected DMP packet size for later comparison
+        packetSize = mpu.dmpGetFIFOPacketSize();
+  } else {
+    #ifdef debug
+        // ERROR!
+        // 1 = initial memory load failed
+        // 2 = DMP configuration updates failed
+        // (if it's going to break, usually the code will be 1)
+      Serial.print("Impossible d'initialiser le gyroscope (code ");
+      Serial.print(devStatus);
+      Serial.println(")");
+     #endif
+     gyEnabled = false;
+  }
+  #ifdef debug
+    delay(333);
+  #endif
 }
 
 /**
@@ -86,21 +175,59 @@ void setup() {
  * Arrete le robot lors de la desactivation du bouton et 
  */
 void loop() {
-  if(digitalRead(startButtonPin)){
-    stop();
-    return;
+  while (!gyEnabled || (calibrated && !mpuInterrupt && fifoCount < packetSize)){
+    if(digitalRead(startButtonPin)){
+      stop();
+      return;
+    }
+    #ifdef LABMODE
+      turnLoop();
+    #endif
+    #ifdef FORWARDMODE
+      forwardLoop();
+    #endif
+    #ifdef SEARCHMODE
+      searchLoop();
+    #endif
   }
-  #ifdef LABMODE
-    turnLoop();
-  #endif
-  #ifdef FORWARDMODE
-    forwardLoop();
-  #endif
-  #ifdef SEARCHMODE
-    searchLoop();
-  #endif
-  
-  
+  if(gyEnabled){
+    mpuInterrupt = false;
+    mpuIntStatus = mpu.getIntStatus();
+    fifoCount = mpu.getFIFOCount();
+    if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
+        mpu.resetFIFO();
+        #ifdef debug
+          Serial.println("FiFo overflow !");
+        #endif
+    } else if (mpuIntStatus & 0x02) {
+        while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+        mpu.getFIFOBytes(fifoBuffer, packetSize);
+        fifoCount -= packetSize;
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+        if(!calibrated){
+          calibrationCount++;
+          if(calibrationCount >= calibrationAmount){
+            calibrated = calibrationCount >= calibrationAmount;
+            calYpr[0] = ypr[0];
+            calYpr[1] = ypr[1];
+            calYpr[2] = ypr[2];
+          }
+          #ifdef gyDebug
+              Serial.print("Calibration : ");
+          #endif
+        }
+        #ifdef gyDebug
+            Serial.print("gyro\t");
+            Serial.print(ypr[0] * 180/M_PI);
+            Serial.print("\t");
+            Serial.print(ypr[1] * 180/M_PI);
+            Serial.print("\t");
+            Serial.println(ypr[2] * 180/M_PI);
+        #endif
+    }
+  }
 }
 
 /**
@@ -110,32 +237,97 @@ void searchLoop(){
   //Le code ici
 }
 
+enum action{
+  TURNLEFT,
+  TURNRIGHT,
+  GOFORWARD,
+  GOBACKWARD
+};
+
+enum sens{
+  FORWARD,
+  BACKWARD,
+  STOPED
+};
+
+enum dire{
+  LEFT,
+  RIGHT,
+  FRONT
+};
+
+sens currentSens = FORWARD;
+dire currentDirection = LEFT;
+action currentAction = TURNLEFT;
+long lastChangedTime = millis();
+bool started = false;
+
 /**
  * Le programme du labirinthe
  */
 void turnLoop(){
-  turnForward();
-  if(justForward){
-    if(isFree(true)){
-      goForward(100);
-    } else {
-      stop();
-      if(isRightFree()){
-        turn(true);
-      } else if(isLeftFree()){
-        turn(false);
-      } else {
-        justForward = false;
-      }
-    }
-  } else {
-    if(isFree(false)){
-      goBackward(100);
-    } else {
-      justForward = true;
-    }
+  if(!started){
+    started = true;
+    lastChangedTime = millis();
   }
-  delay(deadTimeRunning);
+  int actionDuration = millis() - lastChangedTime;
+  switch(currentSens){
+    case FORWARD:
+      goForward(100);
+      break;
+    case BACKWARD:
+      goBackward(100);
+      break;
+    #ifdef debug
+    default:
+      Serial.print("Unknown sens ");
+      Serial.println(currentSens);
+      break;
+    #endif
+  }
+  switch(currentDirection){
+    case TURNLEFT:
+      turnLeft();
+      break;
+    case TURNRIGHT:
+      turnRight();
+      break;
+    case FRONT:
+      turnForward();
+      break;
+    #ifdef debug
+    default:
+      Serial.print("Unknown direction ");
+      Serial.println(currentDirection);
+      break;
+    #endif
+  }
+  switch(currentAction){
+    case GOFORWARD:
+      currentDirection = FRONT;
+      currentSens = FORWARD;
+      break;
+    case GOBACKWARD:
+      currentDirection = FRONT;
+      currentSens = BACKWARD;
+      break;
+    case TURNLEFT:
+      currentDirection = LEFT;
+      currentSens = FORWARD;
+      if(actionDuration >= turnDuration){
+        currentAction = GOFORWARD;
+        lastChangedTime = millis();
+      }
+      break;
+    case TURNRIGHT:
+      currentDirection = RIGHT;
+      currentSens = FORWARD;
+      if(actionDuration >= turnDuration){
+        currentAction = GOFORWARD;
+        lastChangedTime = millis();
+      }
+      break;
+  }
 }
 
 /**
@@ -152,34 +344,9 @@ void forwardLoop(){
 }
 
 /**
- * Toiurner dans la direction voulue
- * @deprecated Utiliser une autre méthode ou composez la votre
- * @param right
- *  True  -> Aller a droite
- *  False -> Aller a gauche
- */
-void turn(bool right){
-  turnForward();
-  goBackward(100);
-  delay(500);
-  stop();
-  if(right){
-    turnRight();
-  } else {
-    turnLeft();
-  }//Configuration du mode utilisé
-  goForward(100);
-  delay(2050);
-  turnForward();
-}
-
-/**
  * Arreter le robot
  */
 void stop(){
-  #if defined(debug)
-    Serial.println("Stopped");
-  #endif
   digitalWrite(motor1A,LOW);
   digitalWrite(motor1B,LOW);
   digitalWrite(motor2A,LOW);
@@ -242,6 +409,8 @@ void turnLeft(){
   turnTo(leftAngle);
 }
 
+int lastTimeTurnForward = -1; //Le dernier temps pour alterner la position de la tête
+
 /**
  * Tourner la tête du robot en face
  */
@@ -249,7 +418,15 @@ void turnForward(){
   #if defined(debug)
     Serial.println("Turning forward");
   #endif
-  turnTo(frontAngle);
+  if(lastTimeTurnForward == -1){
+    lastTimeTurnForward = millis();
+  }
+  if((millis() - lastTimeTurnForward) >= forwardAlternationTime){
+    turnTo(frontAngle+forwardAlternationAmount);
+    lastTimeTurnForward = millis();
+  } else {
+    turnTo(frontAngle);
+  }
 }
 
 /**
