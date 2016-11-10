@@ -10,8 +10,8 @@
  * Décommenter le mode demandé
  */
 //#define LABMODE       //Mode labirinthe
-#define FORWARDMODE   //Mode tout droit
-//#define SEARCHMODE    //Mode Recherche et attaque de la cible
+//#define FORWARDMODE   //Mode tout droit
+#define SEARCHMODE    //Mode Recherche et attaque de la cible
 
 #define brEnable 13 //Pin d'activation des ponts
 /**
@@ -50,7 +50,7 @@
 
 #define leftAngle 100   //Angle du servo pour tourner a gauche
 #define rightAngle 0    //Angle du servo pour tourner a droite
-#define frontAngle 48   //Angle du servo pour aller tout droit
+#define frontAngle 50   //Angle du servo pour aller tout droit
 
 Servo direction;  //Le servo
 int currentAngle = -1;  //L'angle actuel du servo
@@ -112,80 +112,31 @@ void loop() {
  * Le programme de recherche et d'attaque
  */
 
+bool findedObstacle = false;
+  
 void searchLoop(){
-bool find = false;
-while(bool find = false) {
-
-}
-}
-
-void checkTurnLeft(){
-checkTurnLeft();
- 
-  turnLeft();
-  if(isLeftFree()){
-  isFree(true);
-    
+  if(findedObstacle){
+    turnForward();
+    goForward(75);
+    return;
   }
-  else if(isLeftFree()){
-  isFree(false);
-    goForward(100);
-}
-}
-
-void checkTurnForward(){
-checkTurnForward();
-
   turnForward();
-  if(isForwardFree()){
-  isFree(true);
-    
+  if(getDistance(true) <= 100){
+    findedObstacle = true;
   }
-  else if(isForwardFree()){
-  isFree(false);
-    goForward(100);
-}
-}
-  void checkTurnBackward(){
-  checkTurnBackward();
-
-  turnForward();
-  if(isBackFree()){
-  isFree(true);
-    
-  } else if(isBackFree()){
-  isFree(false);
-    goBackward(100);  
-     
-}
-}
-
-  void checkTurnRight(){
-  checkTurnRight();
-
-  turnRight();
-  if(isRightFree()){
-  isFree(true);
-    rotation();
-  }
-  else if(isRightFree()){
-  isFree(false);
-    goForward(100);
-}
+  rotation();
 }
 
 void rotation(){
-  int deadTimeSlot(100);
-  
+  int deadTimeSlot = 400;
   turnRight();
-  goForward(100);
+  goForward(75);
   delay(deadTimeSlot);
   stop();
   turnLeft();
   goBackward(100);
   delay(deadTimeSlot);
   stop();
-
 }
 
 
@@ -201,106 +152,39 @@ void forwardLoop(){
   }
   delay(deadTimeRunning);
 }
-enum action{
-  TURNLEFT,
-  TURNRIGHT,
-  GOFORWARD,
-  GOBACKWARD
-};
 
-enum sens{
-  FORWARD,
-  BACKWARD,
-  STOPED
-};
-
-enum dire{
-  LEFT,
-  RIGHT,
-  FRONT
-};
-
-sens currentSens = FORWARD;
-dire currentDirection = LEFT;
-action currentAction = TURNLEFT;
 long lastChangedTime = millis();
-bool started = false;
 
-/**
- * Le programme du labirinthe
- */
+#define minDistance 40
+
 void turnLoop(){
-  if(!started){
-    started = true;
-    lastChangedTime = millis();
-  }
-  int actionDuration = millis() - lastChangedTime;
-  switch(currentSens){
-    case FORWARD:
-      goForward(100);
-      break;
-    case BACKWARD:
-      goBackward(100);
-      break;
-    #ifdef debug
-    default:
-      Serial.print("Unknown sens ");
-      Serial.println(currentSens);
-      break;
-    #endif
-  }
-  switch(currentDirection){
-    case TURNLEFT:
-      turnLeft();
-      break;
-    case TURNRIGHT:
+  turnForward();
+  if(getDistance(true) < minDistance){
+    stop();
+    turnLeft();
+    if(getDistance(true) > minDistance){
+      goForward(75);
+      delay(500);
+    } else {
       turnRight();
-      break;
-    case FRONT:
-      turnForward();
-      break;
-    #ifdef debug
-    default:
-      Serial.print("Unknown direction ");
-      Serial.println(currentDirection);
-      break;
-    #endif
-  }
-  switch(currentAction){
-    case GOFORWARD:
-      currentDirection = FRONT;
-      currentSens = FORWARD;
-      break;
-    case GOBACKWARD:
-      currentDirection = FRONT;
-      currentSens = BACKWARD;
-      break;
-    case TURNLEFT:
-      currentDirection = LEFT;
-      currentSens = FORWARD;
-      if(actionDuration >= turnDuration){
-        currentAction = GOFORWARD;
-        lastChangedTime = millis();
+      if(getDistance(true) > minDistance){
+        goForward(75);
+        delay(500);
+      } else {
+        goBackward(75);
+        delay(500);
       }
-      break;
-    case TURNRIGHT:
-      currentDirection = RIGHT;
-      currentSens = FORWARD;
-      if(actionDuration >= turnDuration){
-        currentAction = GOFORWARD;
-        lastChangedTime = millis();
-      }
-      break;
+    }
+  } else {
+    goForward(75);
   }
+  lastChangedTime = millis();
 }
 
 /**
  * Arreter le robot
  */
 void stop(){
-  #if defined(debug)
-    Serial.println("Stopped");
-  #endif
   digitalWrite(motor1A,LOW);
   digitalWrite(motor1B,LOW);
   digitalWrite(motor2A,LOW);
@@ -313,9 +197,6 @@ int lastTimeTurnForward = -1; //Le dernier temps pour alterner la position de la
  * Tourner la tête du robot en face
  */
 void turnForward(){
-  #if defined(debug)
-    Serial.println("Turning forward");
-  #endif
   if(lastTimeTurnForward == -1){
     lastTimeTurnForward = millis();
   }
@@ -367,9 +248,6 @@ void goBackward(int spd){
  * Tourner la tête du robot a droite
  */
 void turnRight(){
-  #if defined(debug)
-    Serial.println("Turning right");
-  #endif
   turnTo(rightAngle);
 }
 
@@ -377,9 +255,6 @@ void turnRight(){
  * Tourner la tête du robot a gauche
  */
 void turnLeft(){
-  #if defined(debug)
-    Serial.println("Turning left");
-  #endif
   turnTo(leftAngle);
 }
 
