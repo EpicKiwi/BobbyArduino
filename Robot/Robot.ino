@@ -3,24 +3,24 @@
 //#include "MPU6050_6Axis_MotionApps20.h"
 //#include <Wire.h>
 
-#define debug //Commentez pour cacher les retour série
+//#define debug //Commentez pour cacher les retour série
 
 /**
- * Configuration du mode utilisé
- * Décommenter le mode demandé
- */
+   Configuration du mode utilisé
+   Décommenter le mode demandé
+*/
 //#define LABMODE       //Mode labirinthe
 //#define FORWARDMODE   //Mode tout droit
 #define SEARCHMODE    //Mode Recherche et attaque de la cible
 
-#define brEnable 13 //Pin d'activation des ponts
+#define brEnable 6 //Pin d'activation des ponts
 /**
- * Pins de controle des moteurs
- * 
- *  A     B     Effet
- *  HIGH  LOW   Sens horaire
- *  LOW   HIGH  Sans anti-horaire
- */
+   Pins de controle des moteurs
+
+    A     B     Effet
+    HIGH  LOW   Sens horaire
+    LOW   HIGH  Sans anti-horaire
+*/
 #define motor1A 3
 #define motor1B 9
 #define motor2A 5
@@ -28,23 +28,26 @@
 
 //Pins du capteur arrière
 #define echoPinbk 7
-#define trigPinbk 6
+#define trigPinbk 13
 //Pins du capteur avant
 #define echoPinfr 11
 #define trigPinfr 8
 #define servoPin 4  //Pin de controle du servomoteur
 
+#define baseSpeed 100
+#define backSpeed 100
 #define interruptPin 2  //Pin d'interruption (non utilisé)
 
 #define startButtonPin 12 //Bouton de départ
 
 #define freeDistance 25   //Distance minimum pour estimer une distance comme libre
+#define maxDistance 190
 #define deadTimeRotating 500  //Temps mort lors de la rotation du servo
 #define deadTimeRunning 25    //Temps mort lors de chaque tour de boucle 
 #define rightMotorCalibration 0   //Reduction du moteur de droite pour calibration
 
-#define forwardAlternationTime 800 //Le temps minimum pour l'alternance de la direction quand le robot va tout droit
-#define forwardAlternationAmount 10 //L'angle a ajouter pour compenser la rotation
+#define forwardAlternationTime 2500 //Le temps minimum pour l'alternance de la direction quand le robot va tout droit
+#define forwardAlternationAmount 5 //L'angle a ajouter pour compenser la rotation
 
 #define turnDuration 2000 //Le temps mis pour tourner
 
@@ -56,27 +59,27 @@ Servo direction;  //Le servo
 int currentAngle = -1;  //L'angle actuel du servo
 
 /**
- * Initialisation du robot et calibration
- */
+   Initialisation du robot et calibration
+*/
 void setup() {
-  #if defined(debug)
-    Serial.begin(115200); //Parametres sortie série
-  #endif
+#if defined(debug)
+  Serial.begin(115200); //Parametres sortie série
+#endif
 
   //Configuration des pins
-  pinMode(brEnable,OUTPUT);
-  pinMode(motor1A,OUTPUT);
-  pinMode(motor1B,OUTPUT);
-  pinMode(motor2A,OUTPUT);
-  pinMode(motor2B,OUTPUT);
-  
-  direction.attach(servoPin,750,2250); //Configuration du servo
-  pinMode(trigPinbk,OUTPUT);
-  pinMode(echoPinbk,INPUT);
-  pinMode(trigPinfr,OUTPUT);
-  pinMode(echoPinfr,INPUT);
+  pinMode(brEnable, OUTPUT);
+  pinMode(motor1A, OUTPUT);
+  pinMode(motor1B, OUTPUT);
+  pinMode(motor2A, OUTPUT);
+  pinMode(motor2B, OUTPUT);
 
-  pinMode(startButtonPin,INPUT);
+  direction.attach(servoPin, 750, 2250); //Configuration du servo
+  pinMode(trigPinbk, OUTPUT);
+  pinMode(echoPinbk, INPUT);
+  pinMode(trigPinfr, OUTPUT);
+  pinMode(echoPinfr, INPUT);
+
+  pinMode(startButtonPin, INPUT);
 
   //Activation des moteurs
   digitalWrite(brEnable, HIGH);
@@ -87,65 +90,65 @@ void setup() {
 }
 
 /**
- * Boucle principale
- * Arrete le robot lors de la desactivation du bouton et 
- */
+   Boucle principale
+   Arrete le robot lors de la desactivation du bouton et
+*/
 void loop() {
-  if(digitalRead(startButtonPin)){
+  if (digitalRead(startButtonPin)) {
     stop();
     return;
   }
-  #ifdef LABMODE
-    turnLoop();
-  #endif
-  #ifdef FORWARDMODE
-    forwardLoop();
-  #endif
-  #ifdef SEARCHMODE
-    searchLoop();
-  #endif
-  
-  
+#ifdef LABMODE
+  turnLoop();
+#endif
+#ifdef FORWARDMODE
+  forwardLoop();
+#endif
+#ifdef SEARCHMODE
+  searchLoop();
+#endif
+
+
 }
 
 /**
- * Le programme de recherche et d'attaque
- */
+   Le programme de recherche et d'attaque
+*/
 
 bool findedObstacle = false;
-  
-void searchLoop(){
-  if(findedObstacle){
+
+void searchLoop() {
+  if (findedObstacle) {
     turnForward();
-    goForward(75);
+    goForward(baseSpeed);
     return;
   }
   turnForward();
-  if(getDistance(true) <= 100){
+  if (getDistance(true) <= 100) {
     findedObstacle = true;
   }
   rotation();
 }
 
-void rotation(){
+void rotation() {
   int deadTimeSlot = 400;
   turnRight();
-  goForward(75);
+  goForward(baseSpeed);
   delay(deadTimeSlot);
   stop();
   turnLeft();
-  goBackward(100);
+  goBackward(backSpeed);
   delay(deadTimeSlot);
   stop();
 }
 
 
 /**
- * Le programme permettant d'aller tout droit
- */
-void forwardLoop(){
+   Le programme permettant d'aller tout droit
+*/
+void forwardLoop() {
   turnForward();
-  if(isFree(true)){
+  if (isFree(true)) {
     goForward(100);
   } else {
     stop();
@@ -153,55 +156,67 @@ void forwardLoop(){
   delay(deadTimeRunning);
 }
 
-long lastChangedTime = millis();
+bool forceLook = false;
 
-#define minDistance 40
+#define minDistance 25
 
-void turnLoop(){
+void turnLoop() {
   turnForward();
-  if(getDistance(true) < minDistance){
+  if (forceLook || getDistance(true) < minDistance) {
+    forceLook = false;
     stop();
     turnLeft();
-    if(getDistance(true) > minDistance){
-      goForward(75);
-      delay(500);
+    if (getDistance(true) > minDistance) {
+      turnForward();
+      goBackward(backSpeed);
+      delay(100);
+      stop();
+      turnLeft();
+      goForward(baseSpeed);
+      delay(700);
     } else {
       turnRight();
-      if(getDistance(true) > minDistance){
-        goForward(75);
-        delay(500);
+      if (getDistance(true) > minDistance) {
+        turnForward();
+        goBackward(backSpeed);
+        delay(100);
+        stop();
+        turnRight();
+        goForward(baseSpeed);
+        delay(700);
       } else {
-        goBackward(75);
+        turnForward();
+        goBackward(backSpeed);
         delay(500);
+        forceLook = true;
       }
     }
   } else {
-    goForward(75);
+    goForward(baseSpeed);
   }
-  lastChangedTime = millis();
 }
 
 /**
- * Arreter le robot
- */
-void stop(){
-  digitalWrite(motor1A,LOW);
-  digitalWrite(motor1B,LOW);
-  digitalWrite(motor2A,LOW);
-  digitalWrite(motor2B,LOW);
+   Arreter le robot
+*/
+void stop() {
+  digitalWrite(motor1A, LOW);
+  digitalWrite(motor1B, LOW);
+  digitalWrite(motor2A, LOW);
+  digitalWrite(motor2B, LOW);
 }
 
 int lastTimeTurnForward = -1; //Le dernier temps pour alterner la position de la tête
 
 /**
- * Tourner la tête du robot en face
- */
-void turnForward(){
-  if(lastTimeTurnForward == -1){
+   Tourner la tête du robot en face
+*/
+void turnForward() {
+  if (lastTimeTurnForward == -1) {
     lastTimeTurnForward = millis();
   }
-  if((millis() - lastTimeTurnForward) >= forwardAlternationTime){
-    turnTo(frontAngle+forwardAlternationAmount);
+  if ((millis() - lastTimeTurnForward) >= forwardAlternationTime) {
+    turnTo(frontAngle + forwardAlternationAmount);
     lastTimeTurnForward = millis();
   } else {
     turnTo(frontAngle);
@@ -209,62 +224,62 @@ void turnForward(){
 }
 
 /**
- * Demarrer le robot en marche arrière
- * @param spd
- *  Vitesse du robot entre 0 et 100
- */
-void goForward(int spd){
-  #if defined(debug)
-    Serial.print("Going forward at ");
-    Serial.print(spd);
-    Serial.println(" %");
-  #endif
-  int amount = (spd*255)/100;
-  analogWrite(motor1A,amount);
-  digitalWrite(motor1B,LOW);
-  analogWrite(motor2A,amount);
-  digitalWrite(motor2B,LOW);
+   Demarrer le robot en marche arrière
+   @param spd
+    Vitesse du robot entre 0 et 100
+*/
+void goForward(int spd) {
+#if defined(debug)
+  Serial.print("Going forward at ");
+  Serial.print(spd);
+  Serial.println(" %");
+#endif
+  int amount = (spd * 255) / 100;
+  analogWrite(motor1A, amount);
+  digitalWrite(motor1B, LOW);
+  analogWrite(motor2A, amount);
+  digitalWrite(motor2B, LOW);
 }
 
 /**
- * Demarrer le robot en marche arrière
- * @param spd
- *  Vitesse du robot entre 0 et 100
- */
-void goBackward(int spd){
-  #if defined(debug)
-    Serial.print("Going backward at ");
-    Serial.print(spd);
-    Serial.println(" %");
-  #endif
-  int amount = (spd*255)/100;
-  analogWrite(motor1B,amount);
-  digitalWrite(motor1A,LOW);
-  analogWrite(motor2B,amount);
-  digitalWrite(motor2A,LOW);
+   Demarrer le robot en marche arrière
+   @param spd
+    Vitesse du robot entre 0 et 100
+*/
+void goBackward(int spd) {
+#if defined(debug)
+  Serial.print("Going backward at ");
+  Serial.print(spd);
+  Serial.println(" %");
+#endif
+  int amount = (spd * 255) / 100;
+  analogWrite(motor1B, amount);
+  digitalWrite(motor1A, LOW);
+  analogWrite(motor2B, amount);
+  digitalWrite(motor2A, LOW);
 }
 
 /**
- * Tourner la tête du robot a droite
- */
-void turnRight(){
+   Tourner la tête du robot a droite
+*/
+void turnRight() {
   turnTo(rightAngle);
 }
 
 /**
- * Tourner la tête du robot a gauche
- */
-void turnLeft(){
+   Tourner la tête du robot a gauche
+*/
+void turnLeft() {
   turnTo(leftAngle);
 }
 
 /**
- * Tourner la tête du robot dans un angle spécifique
- * @param angle
- *  L'angle vers lequel tourner entre 0 et 180 deg
- */
-void turnTo(int angle){
-  if(currentAngle != angle){
+   Tourner la tête du robot dans un angle spécifique
+   @param angle
+    L'angle vers lequel tourner entre 0 et 180 deg
+*/
+void turnTo(int angle) {
+  if (currentAngle != angle) {
     direction.write(angle);
     delay(deadTimeRotating);
     currentAngle = angle;
@@ -272,12 +287,12 @@ void turnTo(int angle){
 }
 
 /**
- * Tourner la tête du robot dans tout les sens pour le calibrer
- */
-void dance(){
-  #if defined(debug)
-    Serial.println("Dancing...");
-  #endif
+   Tourner la tête du robot dans tout les sens pour le calibrer
+*/
+void dance() {
+#if defined(debug)
+  Serial.println("Dancing...");
+#endif
   turnForward();
   turnRight();
   turnForward();
@@ -285,26 +300,26 @@ void dance(){
 }
 
 /**
- * Recupèrer la distance sur un capteur
- * @param front
- *  True  -> Regarder en face
- *  False -> Regarder derrière
- */
-long getDistance(bool front){
+   Recupèrer la distance sur un capteur
+   @param front
+    True  -> Regarder en face
+    False -> Regarder derrière
+*/
+long getDistance(bool front) {
   int trigPin = 0;
   int echoPin = 0;
-  float duration, 
-      distance;
-  if(front){
-    #if defined(debug)
-      Serial.println("Polling distance on front");
-    #endif
+  float duration,
+        distance;
+  if (front) {
+#if defined(debug)
+    Serial.println("Polling distance on front");
+#endif
     trigPin = trigPinfr;
     echoPin = echoPinfr;
   } else {
-    #if defined(debug)
-      Serial.println("Polling distance on back");
-    #endif
+#if defined(debug)
+    Serial.println("Polling distance on back");
+#endif
     trigPin = trigPinbk;
     echoPin = echoPinbk;
   }
@@ -314,68 +329,73 @@ long getDistance(bool front){
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
   duration = pulseIn(echoPin, HIGH);
-  distance = (duration/2) / 29.1;
-  if(distance > 200){
+  distance = (duration / 2) / 29.1;  
+  #ifdef LABMODE
+  if (distance > 500) {
+    distance = 0;
+  } else 
+  #endif 
+  if (distance > 200) {
     distance = 200;
   }
-  #if defined(debug)
-    Serial.print("Resulted distance ");
-    Serial.print(distance);
-    Serial.println(" cm");
-  #endif
+#if defined(debug)
+  Serial.print("Resulted distance ");
+  Serial.print(distance);
+  Serial.println(" cm");
+#endif
   return distance;
 }
 
 /**
- * Verifie que le champ est libre a droite
- */
-bool isLeftFree(){
-  #if defined(debug)
-    Serial.println("Checking free space at left");
-  #endif
+   Verifie que le champ est libre a droite
+*/
+bool isLeftFree() {
+#if defined(debug)
+  Serial.println("Checking free space at left");
+#endif
   turnLeft();
   return isFree(true);
 }
 
 /**
- * Verifie que le champ est libre a gauche
- */
-bool isRightFree(){
-  #if defined(debug)
-    Serial.println("Checking free space at right");
-  #endif
+   Verifie que le champ est libre a gauche
+*/
+bool isRightFree() {
+#if defined(debug)
+  Serial.println("Checking free space at right");
+#endif
   turnRight();
   return isFree(true);
 }
 
 /**
- * Verifie que le champ est libre en face
- */
-bool isForwardFree(){
-  #if defined(debug)
-    Serial.println("Checking free space at right");
-  #endif
+   Verifie que le champ est libre en face
+*/
+bool isForwardFree() {
+#if defined(debug)
+  Serial.println("Checking free space at right");
+#endif
   turnForward();
   return isFree(true);
 }
 
 /**
- * Verifie que le champ est libre en face
- */
-bool isBackFree(){
-  #if defined(debug)
-    Serial.println("Checking free space back");
-  #endif
+   Verifie que le champ est libre en face
+*/
+bool isBackFree() {
+#if defined(debug)
+  Serial.println("Checking free space back");
+#endif
   return isFree(false);
 }
 
 /**
- * Verifie que le champ est libre sur un capteur
- * @param front
- *  True  -> Regarder en face
- *  False -> Regarder derrière
- */
-bool isFree(bool front){
+   Verifie que le champ est libre sur un capteur
+   @param front
+    True  -> Regarder en face
+    False -> Regarder derrière
+*/
+bool isFree(bool front) {
   long leftDistance = getDistance(front);
   return leftDistance > freeDistance;
 }
